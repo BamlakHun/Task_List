@@ -3,6 +3,9 @@ const router = express.Router();
 const users = require("../models/users")
 const bcrypt = require('bcryptjs');
 const validateRegisterInput = require('../validation/authValidator');
+const jwt = require('jsonwebtoken');
+const requireAuth = require("../middleware/permissions")
+
 
 // House keeping defingnin route (for ease of understandin)
 // @router GET/api/auth/test
@@ -52,8 +55,18 @@ router.post("/register", async (req, res) => {
             name: req.body.name,
 
         });
-        // save the user to the database
+
         const savedUser = await newUser.save();
+        //spreads all the saved user data into objects(._doc)
+        const userToReturn = { ...savedUser._doc};
+        //then delete
+        delete userToReturn.password;
+
+
+        return res.json(userToReturn);
+
+        // user saved in db
+       
         
         // return saved user
         return res.json(savedUser);
@@ -66,6 +79,92 @@ router.post("/register", async (req, res) => {
     }
 
 });
+
+
+router.post("/login", async (req, res) => {
+    try {
+        const user = await users.findOne({
+            email: new RegExp("^" + req.body.email + "$", "i"),
+        });
+
+        if (!user) {
+            return res.status(400).json({
+                error:"Something went wrong with your login credentials"
+            });
+        }
+        const passwordMatch = await bcrypt.compare(
+            req.body.password, user.password);
+
+        if(!passwordMatch){
+            return res.status(400).json({
+                error:"Something went wrong with your login credentials "
+            });
+
+        }
+             
+        const payload = {userId: savedUser._id};
+            
+        const token = jwt.sign(payload, process.env.JWT_SECRET, {
+                expiresIn: "7d"
+               });
+       
+                res.cookie("access-token", token, {
+                expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+                httpOnly: true,
+                secure: process.env.NODE_ENV === "production"
+       
+               });
+                       
+        const userToReturn = { ...user._doc};
+        delete userToReturn.password;
+
+                return res.json({ 
+                token: token, 
+                user: userToReturn}); // now we no longer have the password returned back
+       
+               
+
+           // return res.json({ passwordMatch: passwordMatch});
+
+    } catch (err) {
+        console.log(err);
+
+        return res.status (500).send(err.message);
+        
+    }
+});
+
+// @router POST/api/auth/current
+// @desc got to current authed user
+// @access private
+
+
+router.get("/current", requireAuth, (req, res) => {
+    if(!req.user){
+        return res.status(401).send("Unauthorized");
+    }
+
+        return res.json(req.user);
+
+});
+
+// @router PUT/api/logout
+// @desc   Clear cookie and logout
+// @access Private
+
+router.put("/logout", requireAuth, async(req, res) => {
+    try {
+       res.clearCookie("access-token");
+
+       return res.json({success: true});
+        
+    } catch (err) {
+      console.log(err);
+       
+    }
+    return res.status(500).send(err.message);
+});
+
 
 
 // export router
